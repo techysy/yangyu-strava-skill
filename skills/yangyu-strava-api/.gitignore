@@ -3,3 +3,7 @@ scripts/strava_credentials.py
 scripts/strava_creds.py
 references/publishing-guide.md
 references/publishing.md
+skills/yangyu-strava-api/__pycache__/
+skills/yangyu-strava-api/scripts/strava_credentials.py
+skills/yangyu-strava-api/scripts/strava_creds.py
+skills/yangyu-strava-api/references/strava_tokens.json
