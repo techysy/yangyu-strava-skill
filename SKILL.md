@@ -101,10 +101,10 @@ Convert distance: `distance / 1000` → km.
 查询天府绿道等本地骑行段的最快纪录、公开搜索方法和已知数据：
 → `references/chengdu-cycling-segments.md`
 
-## Router Proxy Workaround (OpenClash fake-ip 环境)
+## ~~Router Proxy Workaround (可选)~~ 
 
-当本机被 OpenClash fake-ip 劫持时，所有 HTTPS API 调用会失败（SSL EOF）。解决方案是 SSH 到旁路由，用 `curl --resolve` 绕过 DNS 劫持。详细文档：
-→ `references/router-proxy-workaround.md`
+> **已过时：** 如果不涉及 OpenClash fake-ip 环境，直接使用 **Credential Storage** 章节的简单方式即可。  
+> 若仍需在 fake-ip 环境下使用，参考 `references/router-proxy-workaround.md`。
 
 ## Credential Storage & Auto-Refresh
 
@@ -131,63 +131,30 @@ See `references/credentials.md` for details.
 
 ## Fetching Activities (Hermes Agent)
 
-The recommended workflow when running inside Hermes Agent on a machine behind OpenClash fake-ip:
-
-### One-shot fetch (no automation needed)
-
 ```python
-import subprocess, json, tempfile, os
+from scripts.strava_credentials import get_recent_activities, get_athlete_stats
 
-# 1. Read saved tokens
-with open('YOUR_SKILL_PATH/references/strava_tokens.json') as f:
-    tokens = json.load(f)
-
-# 2. SCP refresh POST data to router
-post = f"client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET&grant_type=refresh_token&refresh_token={tokens['refresh_token']}".encode()
-with tempfile.NamedTemporaryFile(delete=False) as f:
-    f.write(post)
-    p = f.name
-subprocess.run(["scp", p, "root@ROUTER_IP:/tmp/sf.bin"], timeout=15)
-os.unlink(p)
-
-# 3. Refresh on router, read back the new token
-subprocess.run(["ssh", "root@ROUTER_IP",
-    'curl -s --max-time 15 --resolve "www.strava.com:443:104.26.11.186" -X POST https://www.strava.com/oauth/token -d @/tmp/sf.bin > /tmp/sf_auth.json'],
-    timeout=30)
-
-r = subprocess.run(["ssh", "root@ROUTER_IP", "cat /tmp/sf_auth.json"], capture_output=True, text=True, timeout=10)
-a = json.loads(r.stdout)
-new_token = a['access_token']
-
-# 4. Fetch activities with the new token (pass it directly, not through env vars)
-r2 = subprocess.run(["ssh", "root@ROUTER_IP",
-    f'curl -s --max-time 15 --resolve "www.strava.com:443:104.26.11.186" -H "Authorization: Bearer {new_token}" "https://www.strava.com/api/v3/athlete/activities?per_page=5"'],
-    capture_output=True, text=True, timeout=30)
-
-activities = json.loads(r2.stdout)
+# Auto-refreshes token if needed
+activities = get_recent_activities(per_page=5)
 for a in activities:
-    print(f"{a['name']} — {a['distance']/1000:.1f}km / {a['moving_time']//60}min")
+    d = a['start_date_local'][:10]
+    km = a['distance'] / 1000
+    print(f"{d}  {km:.1f}km  {a['name']}")
+
+# Or get athlete stats
+stats = get_athlete_stats()
+rt = stats['all_ride_totals']
+print(f"Total: {rt['distance']/1000:.0f}km / {rt['count']} rides")
 ```
 
-### IMPORTANT: `security.redact_secrets` quirk
+### Token Auto-Refresh
 
-When passing tokens through SSH command arguments or env vars (`$TOK`, `$(cat file)`), Hermes' secret redaction may truncate the value (replaces it with `***`). This is because the token substring matches a secret pattern.
+Tokens expire every 6 hours. `strava_credentials.py` handles refresh automatically.  
+Tokens are persisted to `references/strava_tokens.json`.
 
-**Symptom**: `curl` returns `{"message":"Authorization Error"}` even though `cat /tmp/sf_auth.json` shows a valid token.
+### Security: `security.redact_secrets`
 
-**Fix**: Do not pipe the token through variables. Instead:
-1. Read the token from the router's auth response via `cat`
-2. Pass the token directly (hardcoded) in the SSH command string
-3. The redaction only triggers during `$(...)` substitution, NOT when the token is in a Python f-string that gets passed as a literal command argument
-
-If direct token passing also fails, temporarily disable redaction:
-```bash
-hermes config set security.redact_secrets false
-```
-Then re-enable after the fetch:
-```bash
-hermes config set security.redact_secrets true
-```
+If you pass tokens through command arguments, Hermes' secret redaction may truncate them. See `references/hermes-secret-redaction-bypass.md` for workarounds.
 
 ## 骑行活动分析指南
 
@@ -202,11 +169,11 @@ hermes config set security.redact_secrets true
 | 踏频 | 60-70 | 75-85 | 85-95 | 90-110 |
 | 体感 | <20 | 20-50 | 50-120 | 120+ |
 
-用户 FTP ~240W，体重当前 ~70kg。
+
 
 ### 逐项分析要点
 
-1. **⏱ 时间/距离/均速** — 结合爬升判断是平路还是丘陵。中江地形 20km/181m↑ 算丘陵。Gravel 和通勤分开看。
+1. **⏱ 时间/距离/均速** — 结合爬升判断是平路还是丘陵。Gravel 和通勤分开看。
 2. **💓 心率** — 平均 + 最高。最高心率接近 180+ 说明有冲坡或冲刺。平均低于 120 说明非常轻松。
 3. **🔋 功率 (平均/NP/最高)** — NP 和平均差距大说明功率波动大（间歇/短坡）。最高功率 700+ 是冲刺或陡坡。
 4. **⛰ 爬升** — <50m 平路，50-150m 微起伏，150m+ 丘陵/爬坡。
@@ -217,23 +184,39 @@ hermes config set security.redact_secrets true
 
 当用户问"和上次比怎么样"时，用表格对比两次骑行数据。
 
-### 膝盖恢复期建议
+### 日期计算注意事项
+
+- 用 Python 动态计算日期范围：`datetime.date.today()` + `weekday()`（周一=0）
+- 不要在提示词中硬编码"本周一至本周日"——用代码运行时计算
+- 过滤活动时用 `type == 'Ride'`，排除 `EBikeRide`、`Walk`、`Run` 等
+- 按用户偏好短句、不啰嗦、结尾适当用 emoji
+
+### 恢复期建议
 
 - 避免陡坡冲刺大齿比硬踩
 - 踏频保持 75-85rpm
 - 单日总量不超过 40km（恢复期）
 - 通勤当排酸骑，不冲不拼
-- 注意破皮伤口消毒（碘伏，不贴创可贴）
-- 肿胀冰敷 15min/次
 
-### 用户个人背景
+### 每周骑行统计 Cron 推送
 
-Yangyu (洋芋), Strava ID 121173304. FTP ~240W, 目标体重 64kg, 当前 ~70.8kg. 骑行通勤 6km 单程. 中江丘陵地形. 膝盖软组织挫伤恢复中（滑铲摔伤，右膝破皮左膝肿，无硬伤）. 偏好极简直接的骑行数据分析.
+如果网络环境有 DNS 劫持（如 OpenClash fake-ip），cron 提示词必须**显式写明 SSH 绕过步骤**，不能只写"调 strava_credentials"——cron 会话没有 SSH 上下文。
+
+**关键规则：**
+- 提示词里写出完整的命令字符串，不要依赖环境变量
+- token 从文件读取后直接拼入 SSH 命令
+- 用 Python 动态算日期范围（`datetime.date.today().weekday()`），不硬编码
+- 过滤 `type='Ride'`，排除 `EBikeRide`
+- 用户偏好短句、数据清晰、结尾带 🚴
+
+如果 DNS 已恢复正常（本机直连），直接用 `scripts/strava_credentials.get_recent_activities()` 即可。
 
 ## Full Python Script (one-shot)
 
 - `scripts/strava_fetch.py` — complete script: authorize → fetch stats → print activities
 - `scripts/strava_credentials.py` — recommended credential management module (auto-refresh, persist to `references/strava_tokens.json`)
+- `references/publishing-guide.md` — how to open-source this skill (sanitization + publish)
+- `references/strava-mcp.md` — alternative: use Strava via MCP protocol
 - `references/publishing.md` — sanitization record and publish instructions for open-sourcing this skill
 
 ## Publishing to Hermes Hub (Open-Source)
