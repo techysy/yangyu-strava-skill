@@ -96,15 +96,80 @@ Convert distance: `distance / 1000` → km.
 7. **Hermes secret redaction truncates tokens in SSH command strings** — tokens, client secrets, and refresh tokens passed through SSH command arguments get replaced with `***` by the secret scanner. See `references/hermes-secret-redaction-bypass.md` for working workarounds (`-H @file`, scp binary POST data, char-by-char printf on router)
 8. **Interval.icu API auth fails consistently** — tried Basic Auth (`email:api_key`), Bearer token, and query parameter auth against `intervals.icu/api/v1/athlete/{id}/activities?oldest=false` — all return 401. Weight update via PUT/PATCH to `/athlete/{id}/weight` returns 404. Use the Intervals.icu web UI for weight changes.
 
+## 多维度骑行路线搜索
+
+当用户问"帮我查某条特定路线"时，无法只靠活动名称匹配，需综合多个维度交叉定位：
+
+### 搜索策略（按优先级排序）
+
+1. **名称关键词** — `'天府' or '绕城' or '环城' in a['name']`（先精确匹配）
+2. **出发坐标** — 用 `start_latlng` 做 bounding box 过滤
+3. **距离范围** — 如天府绿道完整一圈约 96-100km
+4. **爬升率** — 平路绿道爬升/距离 < 10m/km，山路线 > 15m/km
+5. **均速交叉验证** — 用户说的"匀速35"可能实际 33.7，展示数据让用户辨认
+
+### 代码模板
+
+```python
+import urllib.request, json
+from scripts.strava_credentials import get_token
+
+token = get_token()
+all_acts = []
+for page in range(1, 11):  # 最多 2000 条
+    req = urllib.request.Request(
+        f'https://www.strava.com/api/v3/athlete/activities?per_page=200&page={page}',
+        headers={'Authorization': f'Bearer {token}'}
+    )
+    acts = json.loads(urllib.request.urlopen(req).read())
+    if not acts: break
+    all_acts.extend(acts)
+
+# 多维度过滤
+hits = []
+for a in all_acts:
+    if a['type'] != 'Ride': continue
+    km = a['distance'] / 1000
+    spd = a.get('average_speed', 0) * 3.6
+    latlng = a.get('start_latlng')
+    # 坐标框: e.g. 环球中心/锦城湖 = 30.45-30.55, 103.95-104.15
+    in_area = latlng and 30.45 < latlng[0] < 30.55 and 103.95 < latlng[1] < 104.15
+    if km >= 85 and in_area and spd >= 30:
+        hits.append(a)
+```
+
+### 已知坐标参考
+
+| 区域 | 纬度范围 | 经度范围 |
+|------|---------|---------|
+| 环球中心/锦城湖 | 30.45-30.55 | 103.95-104.15 |
+| 中江县城 | 31.04-31.08 | 104.64-104.68 |
+| 兴隆湖/天府新区 | 30.40-30.48 | 103.98-104.08 |
+| 龙泉山 | 30.48-30.56 | 104.14-104.28 |
+
+### Pitfalls
+
+- 活动名称不一定标注路线名 — 100km 天府绿道骑行可能叫"和郭老师 100km☕️骑"而非"天府绿道"
+- 用户记忆的速度可能有偏差 — "匀速35"实际可能 33.7km/h，展示数据让用户辨认
+- `get_recent_activities()` 默认返回最新 200 条，历史数据需要手动分页
+- `average_speed` 是移动均速（排除休息时间）
+
 ## 成都骑行相关
 
 查询天府绿道等本地骑行段的最快纪录、公开搜索方法和已知数据：
 → `references/chengdu-cycling-segments.md`
 
+## 出行规划
+
+骑行目的地天气查询和驾车距离规划：
+→ `references/ride-trip-weather.md`
+
 ## ~~Router Proxy Workaround (可选)~~ 
 
 > **已过时：** 如果不涉及 OpenClash fake-ip 环境，直接使用 **Credential Storage** 章节的简单方式即可。  
 > 若仍需在 fake-ip 环境下使用，参考 `references/router-proxy-workaround.md`。
+>
+> DNS 直连修复方案见 `references/dns-fix-fakeip.md`。
 
 ## Credential Storage & Auto-Refresh
 
@@ -169,7 +234,11 @@ If you pass tokens through command arguments, Hermes' secret redaction may trunc
 | 踏频 | 60-70 | 75-85 | 85-95 | 90-110 |
 | 体感 | <20 | 20-50 | 50-120 | 120+ |
 
+### ⚠️ 日期计算注意
 
+每次做日期判断前，先用 `date` 查系统本地时间，不要凭猜测推定工作日/周末。用户环境时区为 Asia/Shanghai (CST)。
+
+常见错误：把今天当成周几来推算日期范围，导致周统计范围乱掉。**先 `date`，再算日期。**
 
 ### 逐项分析要点
 
