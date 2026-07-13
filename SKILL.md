@@ -269,16 +269,21 @@ If you pass tokens through command arguments, Hermes' secret redaction may trunc
 
 ### 每周骑行统计 Cron 推送
 
-如果网络环境有 DNS 劫持（如 OpenClash fake-ip），cron 提示词必须**显式写明 SSH 绕过步骤**，不能只写"调 strava_credentials"——cron 会话没有 SSH 上下文。
+Cron job ID: `17c932f9effb`，每周日 **21:00** 运行（留足 Strava 同步时间）。
 
-**关键规则：**
-- 提示词里写出完整的命令字符串，不要依赖环境变量
-- token 从文件读取后直接拼入 SSH 命令
-- 用 Python 动态算日期范围（`datetime.date.today().weekday()`），不硬编码
-- 过滤 `type='Ride'`，排除 `EBikeRide`
-- 用户偏好短句、数据清晰、结尾带 🚴
-
-如果 DNS 已恢复正常（本机直连），直接用 `scripts/strava_credentials.get_recent_activities()` 即可。
+**关键规则（踩坑总结）：**
+1. **先 `cd ~/.hermes/skills/social-media/strava-api`** 再调 Python 脚本
+2. 用 Python 动态算日期范围 + 星期几：
+   ```python
+   dow = ['周一','周二','周三','周四','周五','周六','周日'][d.weekday()]
+   ```
+   **不要靠模型猜测星期几** — 之前 cron 跑出过"7/9 周三"（实际是周四）的错误
+3. 过滤 `type='Ride'`，排除 `EBikeRide`
+4. 按日期 **升序排列**（最早的在前）
+5. **紧凑格式** — Feishu 推送超过 ~15000 字节会被截断。表格列数精简，不要大段文字
+6. 周日有多次骑行时**全列出来**，不要漏
+7. 100km 以上加鼓励，结尾带 🚴
+8. 如果 DNS 正常（本机直连），直接用 `scripts/strava_credentials.get_recent_activities()` 即可
 
 ## Full Python Script (one-shot)
 
