@@ -1,6 +1,8 @@
 # yangyu-strava-api 🚴
 
 > Strava API Hermes Skill — OAuth 管理、活动数据获取、骑行分析，自动刷新 token，支持 Hermes Agent 和独立使用
+> 
+> 👤 作者: [洋芋](https://www.strava.com/athletes/121173304) (Strava ID: 121173304)
 
 [English](#english)
 
