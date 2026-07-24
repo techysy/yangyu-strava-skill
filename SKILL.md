@@ -234,11 +234,31 @@ If you pass tokens through command arguments, Hermes' secret redaction may trunc
 | 踏频 | 60-70 | 75-85 | 85-95 | 90-110 |
 | 体感 | <20 | 20-50 | 50-120 | 120+ |
 
-### ⚠️ 日期计算注意
+### ⚠️ 日期计算黄金法则（用户反复纠正过，务必遵守）
 
-每次做日期判断前，先用 `date` 查系统本地时间，不要凭猜测推定工作日/周末。用户环境时区为 Asia/Shanghai (CST)。
+**每次做任何涉及日期/时间/星期几的判断前，必须先执行 `date` 命令确认本地系统时间。** 用户环境时区为 Asia/Shanghai (CST)。
 
-常见错误：把今天当成周几来推算日期范围，导致周统计范围乱掉。**先 `date`，再算日期。**
+**绝对禁止的行为：**
+- ❌ 凭对话上下文推测当前日期时间
+- ❌ 凭记忆推定"今天"是周几
+- ❌ 在 cron 提示词中硬编码日期字符串
+- ❌ 午夜后不先检查系统时钟就说话
+
+**常见翻车场景：**
+- 把7/6周一当成周六（实际系统时间是7/8周三）
+- 说"早上好"但实际已23:53
+- 说"明天"但过了零点就是今天
+- 说"这周"但周五以为是周六
+
+**正确做法：**
+```python
+# 每次都用 datetime 实时计算，不要依赖模型猜测
+import datetime
+today = datetime.date.today()
+dow = ['周一','周二','周三','周四','周五','周六','周日'][today.weekday()]
+monday = today - datetime.timedelta(days=today.weekday())
+sunday = monday + datetime.timedelta(days=6)
+```
 
 ### 逐项分析要点
 
