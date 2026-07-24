@@ -1,8 +1,112 @@
 # yangyu-strava-api 🚴
 
-> A Hermes Agent skill for Strava API integration — OAuth token management, activity fetching, athlete stats, and cycling data analysis.
+> Strava API Hermes Skill — OAuth 管理、活动数据获取、骑行分析，自动刷新 token，支持 Hermes Agent 和独立使用
 
-[中文版](#中文版)
+[English](#english)
+
+---
+
+## 中文版
+
+### 功能
+
+- **🔑 自动刷新 Token** — Strava OAuth token 每 6 小时过期，自动无缝刷新
+- **📊 获取活动数据** — 拉取骑行、跑步等活动（距离、时长、心率、功率、爬升）
+- **🏆 运动员统计** — 年度和总累计数据
+- **🚴 骑行分析指南** — 心率区间、功率区间、踏频等分析维度
+
+### 安装
+
+```bash
+git clone https://github.com/techysy/yangyu-strava-skill.git ~/.hermes/skills/social-media/yangyu-strava-api
+```
+
+### 配置步骤
+
+#### 1. 创建 Strava API 应用
+
+访问 https://www.strava.com/settings/api 注册应用。
+
+你会得到：
+- **Client ID** — 例如 `123456`
+- **Client Secret** — 例如 `a1b2c3d4e5f6...`
+
+> ⚠️ **Client Secret 是你的 API 密钥，不要提交到公开仓库。**
+
+#### 2. 填入凭证
+
+创建 `scripts/strava_credentials.py`（参照模板）：
+
+```python
+CONFIG = {
+    "client_id": "YOUR_CLIENT_ID",         # 填你的 Client ID
+    "client_secret": "YOUR_CLIENT_SECRET",  # 填你的 Client Secret
+    "athlete_id": "YOUR_ATHLETE_ID",       # 填你的 Athlete ID
+}
+```
+
+> 此文件已在 `.gitignore` 中，不会提交到仓库。
+
+#### 3. OAuth 授权
+
+在浏览器中打开：
+
+```
+https://www.strava.com/oauth/authorize?client_id=你的CLIENT_ID&response_type=code&redirect_uri=http://localhost&approval_prompt=force&scope=read,activity:read_all
+```
+
+授权后浏览器跳转到 `http://localhost/?state=&code=XXXXXXXX...`，复制 `code` 值。
+
+#### 4. 用 Code 换取 Access Token
+
+```bash
+python3 scripts/setup_credentials.py
+```
+
+或者手动用 curl 交换 token。之后脚本会自动刷新，token 存储在 `references/strava_tokens.json`（已 gitignore）。
+
+#### 5. 验证
+
+```python
+from scripts.strava_credentials import get_recent_activities
+activities = get_recent_activities(per_page=5)
+for a in activities:
+    print(f"{a['name']} — {a['distance']/1000:.1f}km")
+```
+
+### 使用
+
+```python
+from scripts.strava_credentials import get_recent_activities, get_athlete_stats
+
+# 自动刷新 token
+activities = get_recent_activities(per_page=5)
+for a in activities:
+    print(f"{a['name']} — {a['distance']/1000:.1f}km / {a['moving_time']//60}min")
+
+# 获取累计统计
+stats = get_athlete_stats()
+rt = stats['all_ride_totals']
+print(f"总计: {rt['distance']/1000:.0f}km / {rt['count']} 次骑行")
+```
+
+在 Hermes Agent 中加载：
+
+```bash
+hermes -s yangyu-strava-api
+```
+
+### 安全说明
+
+- **凭证文件已全部 gitignore** — `scripts/strava_credentials.py`、`scripts/strava_creds.py`、`references/strava_tokens.json` 不会被提交
+- **Token 每 6 小时过期** — `strava_credentials.py` 自动刷新
+- **Client Secret 泄露?** — 立即去 https://www.strava.com/settings/api 重置
+
+### 依赖
+
+- Python 3.8+
+- Strava API 应用（免费，注册于 https://www.strava.com/settings/api）
+- Hermes Agent（可选——脚本可独立运行）
 
 ---
 
@@ -117,110 +221,6 @@ hermes -s yangyu-strava-api
 - Python 3.8+
 - Strava API Application (free, sign up at https://www.strava.com/settings/api)
 - Hermes Agent (optional — the scripts work standalone)
-
----
-
-## 中文版
-
-### 功能
-
-- **🔑 自动刷新 Token** — Strava OAuth token 每 6 小时过期，自动无缝刷新
-- **📊 获取活动数据** — 拉取骑行、跑步等活动（距离、时长、心率、功率、爬升）
-- **🏆 运动员统计** — 年度和总累计数据
-- **🚴 骑行分析指南** — 心率区间、功率区间、踏频等分析维度
-
-### 安装
-
-```bash
-git clone https://github.com/techysy/yangyu-strava-skill.git ~/.hermes/skills/social-media/yangyu-strava-api
-```
-
-### 配置步骤
-
-#### 1. 创建 Strava API 应用
-
-访问 https://www.strava.com/settings/api 注册应用。
-
-你会得到：
-- **Client ID** — 例如 `123456`
-- **Client Secret** — 例如 `a1b2c3d4e5f6...`
-
-> ⚠️ **Client Secret 是你的 API 密钥，不要提交到公开仓库。**
-
-#### 2. 填入凭证
-
-创建 `scripts/strava_credentials.py`（参照模板）：
-
-```python
-CONFIG = {
-    "client_id": "YOUR_CLIENT_ID",         # 填你的 Client ID
-    "client_secret": "YOUR_CLIENT_SECRET",  # 填你的 Client Secret
-    "athlete_id": "YOUR_ATHLETE_ID",       # 填你的 Athlete ID
-}
-```
-
-> 此文件已在 `.gitignore` 中，不会提交到仓库。
-
-#### 3. OAuth 授权
-
-在浏览器中打开：
-
-```
-https://www.strava.com/oauth/authorize?client_id=你的CLIENT_ID&response_type=code&redirect_uri=http://localhost&approval_prompt=force&scope=read,activity:read_all
-```
-
-授权后浏览器跳转到 `http://localhost/?state=&code=XXXXXXXX...`，复制 `code` 值。
-
-#### 4. 用 Code 换取 Access Token
-
-```bash
-python3 scripts/setup_credentials.py
-```
-
-或者手动用 curl 交换 token。之后脚本会自动刷新，token 存储在 `references/strava_tokens.json`（已 gitignore）。
-
-#### 5. 验证
-
-```python
-from scripts.strava_credentials import get_recent_activities
-activities = get_recent_activities(per_page=5)
-for a in activities:
-    print(f"{a['name']} — {a['distance']/1000:.1f}km")
-```
-
-### 使用
-
-```python
-from scripts.strava_credentials import get_recent_activities, get_athlete_stats
-
-# 自动刷新 token
-activities = get_recent_activities(per_page=5)
-for a in activities:
-    print(f"{a['name']} — {a['distance']/1000:.1f}km / {a['moving_time']//60}min")
-
-# 获取累计统计
-stats = get_athlete_stats()
-rt = stats['all_ride_totals']
-print(f"总计: {rt['distance']/1000:.0f}km / {rt['count']} 次骑行")
-```
-
-在 Hermes Agent 中加载：
-
-```bash
-hermes -s yangyu-strava-api
-```
-
-### 安全说明
-
-- **凭证文件已全部 gitignore** — `scripts/strava_credentials.py`、`scripts/strava_creds.py`、`references/strava_tokens.json` 不会被提交
-- **Token 每 6 小时过期** — `strava_credentials.py` 自动刷新
-- **Client Secret 泄露?** — 立即去 https://www.strava.com/settings/api 重置
-
-### 依赖
-
-- Python 3.8+
-- Strava API 应用（免费，注册于 https://www.strava.com/settings/api）
-- Hermes Agent（可选——脚本可独立运行）
 
 ---
 
